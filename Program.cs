@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace FurnitureAnalytics
 {
-    // структура для представлення замовлення у нашій предметній області
+    // структура замовлення для нашої меблевої тематики
     public class Order
     {
         public int Id { get; set; }
@@ -15,119 +15,122 @@ namespace FurnitureAnalytics
         public bool IsCompleted { get; set; }
     }
 
-    // клас-аргумент для передачі даних через подію
+    // клас для передачі розширених даних через подію
     public class OrderEventArgs : EventArgs
     {
         public Order Order { get; }
-        public string Message { get; }
+        public string ActionDescription { get; }
+        public DateTime Timestamp { get; }
 
-        public OrderEventArgs(Order order, string message)
+        public OrderEventArgs(Order order, string actionDescription)
         {
             Order = order;
-            Message = message;
+            ActionDescription = actionDescription;
+            Timestamp = DateTime.Now;
         }
     }
 
-    // менеджер замовлень, який керує колекцією та генерує події при зміні стану
+    // менеджер замовлень, який відповідає за бізнес-логіку та генерацію подій
     public class OrderManager
     {
         private List<Order> _orders = new List<Order>();
 
-        // оголошуємо події системи за допомогою стандартного EventHandler
+        // оголошуємо події предметної області за стандартом .NET
         public event EventHandler<OrderEventArgs> OrderCreated;
         public event EventHandler<OrderEventArgs> OrderStatusChanged;
+        public event EventHandler<OrderEventArgs> OrderOperationPerformed;
+        public event EventHandler<OrderEventArgs> BusinessRuleViolated;
 
-        // метод додавання нового замовлення з генеруванням події створення
+        // операція створення сутності з генерацією відповідної події
         public void AddOrder(Order order)
         {
-            _orders.Add(order);
+            if (order.TotalPrice <= 0)
+            {
+                // генеруємо подію порушення бізнес-правила
+                BusinessRuleViolated?.Invoke(this, new OrderEventArgs(order, "Спроба додати замовлення з нульовою або від'ємною вартістю!"));
+                return;
+            }
 
-            // викликаємо подію, якщо на неї хтось підписався
-            OrderCreated?.Invoke(this, new OrderEventArgs(order, "Створено нове замовлення в системі"));
+            _orders.Add(order);
+            OrderCreated?.Invoke(this, new OrderEventArgs(order, "Успішно створено нове замовлення"));
         }
 
-        // метод зміни статусу замовлення з генеруванням події зміни стану
+        // операція зміни статусу замовлення
         public void CompleteOrder(int orderId)
         {
             var order = _orders.FirstOrDefault(o => o.Id == orderId);
             if (order != null && !order.IsCompleted)
             {
                 order.IsCompleted = true;
-
-                // викликаємо подію зміни статусу
                 OrderStatusChanged?.Invoke(this, new OrderEventArgs(order, "Статус замовлення змінено на 'Виконано'"));
             }
         }
 
-        // СЦЕНАРІЙ 1: Фільтрація замовлень за допомогою делегата Predicate (делегування критерію пошуку)
-        public List<Order> FindOrders(Predicate<Order> criteria)
+        // виконання операції над сутністю
+        public void PerformAssembly(int orderId)
         {
-            List<Order> result = new List<Order>();
-            foreach (var order in _orders)
+            var order = _orders.FirstOrDefault(o => o.Id == orderId);
+            if (order != null)
             {
-                if (criteria(order))
-                {
-                    result.Add(order);
-                }
-            }
-            return result;
-        }
-
-        // СЦЕНАРІЙ 2: Обробка замовлень за допомогою делегата Action (делегування довільної дії над елементами)
-        public void ProcessOrders(Action<Order> action)
-        {
-            foreach (var order in _orders)
-            {
-                action(order);
+                OrderOperationPerformed?.Invoke(this, new OrderEventArgs(order, $"Розпочато та виконано монтажні роботи тривалістю {order.AssemblyHours} годин"));
             }
         }
     }
 
-    // ПІДПИСНИК 1: Логгер, який записує всі події системи у консоль
-    public class OrderLogger
+    // ПІДПИСНИК 1: Сервіс сповіщень (формує повідомлення для користувача/клієнта)
+    public class NotificationService
     {
-        public void Subscribe(OrderManager manager)
+        public void Register(OrderManager manager)
         {
             manager.OrderCreated += OnOrderCreated;
             manager.OrderStatusChanged += OnOrderStatusChanged;
+            manager.BusinessRuleViolated += OnBusinessRuleViolated;
         }
 
-        private void OnOrderCreated(object sender, OrderEventArgs e)
+        private void OnOrderCreated(object sender, EventArgs e)
         {
-            Console.WriteLine($"[ЛОГ СИСТЕМИ]: {e.Message} | Клієнт: {e.Order.ClientName} ({e.Order.Category})");
+            var args = e as OrderEventArgs;
+            Console.WriteLine($"[ПОВІДОМЛЕННЯ КЛІЄНТУ]: Шановний(-а) {args.Order.ClientName}, ваше замовлення на {args.Order.Category} прийняте в роботу!");
         }
 
-        private void OnOrderStatusChanged(object sender, OrderEventArgs e)
+        private void OnOrderStatusChanged(object sender, EventArgs e)
         {
-            Console.WriteLine($"[ЛОГ СИСТЕМИ]: {e.Message} | Клієнт: {e.Order.ClientName} | Сума: {e.Order.TotalPrice} грн");
+            var args = e as OrderEventArgs;
+            Console.WriteLine($"[ПОВІДОМЛЕННЯ КЛІЄНТУ]: Вітаємо! Ваші меблі ({args.Order.Category}) готові. Дякуємо, що обрали нас!");
+        }
+
+        private void OnBusinessRuleViolated(object sender, EventArgs e)
+        {
+            var args = e as OrderEventArgs;
+            Console.WriteLine($"[ПОПЕРЕДЖЕННЯ СИСТЕМИ]: Помилка для клієнта {args.Order.ClientName} -> {args.ActionDescription}");
         }
     }
 
-    // ПІДПИСНИК 2: Трекер статистики, який реагує на події та оновлює показники в реальному часі
-    public class StatisticsTracker
+    // ПІДПИСНИК 2: Журнал подій та аудиту (виконує логування та статистичний підрахунок)
+    public class AuditLogger
     {
-        private int _createdCount = 0;
-        private decimal _totalCompletedSum = 0;
+        private int _totalEventsLogged = 0;
+        private decimal _accumulatedRevenue = 0;
 
-        public void Subscribe(OrderManager manager)
+        public void Register(OrderManager manager)
         {
-            manager.OrderCreated += OnOrderCreated;
-            manager.OrderStatusChanged += OnOrderStatusChanged;
+            manager.OrderCreated += OnEventOccurred;
+            manager.OrderStatusChanged += OnEventOccurred;
+            manager.OrderOperationPerformed += OnEventOccurred;
+            manager.BusinessRuleViolated += OnEventOccurred;
         }
 
-        private void OnOrderCreated(object sender, OrderEventArgs e)
+        private void OnEventOccurred(object sender, EventArgs e)
         {
-            _createdCount++;
-            Console.WriteLine($"[СТАТИСТИКА]: Загальна кількість створених замовлень оновлена -> {_createdCount}");
-        }
+            var args = e as OrderEventArgs;
+            _totalEventsLogged++;
 
-        private void OnOrderStatusChanged(object sender, OrderEventArgs e)
-        {
-            if (e.Order.IsCompleted)
+            if (args.Order.IsCompleted && args.ActionDescription.Contains("Виконано"))
             {
-                _totalCompletedSum += e.Order.TotalPrice;
-                Console.WriteLine($"[СТАТИСТИКА]: Загальна виручка по виконаних замовленнях -> {_totalCompletedSum} грн");
+                _accumulatedRevenue += args.Order.TotalPrice;
             }
+
+            Console.WriteLine($"[АУДИТ ЛОГ]: Час: {args.Timestamp:HH:mm:ss} | Подія: {args.ActionDescription} | Загалом подій у лозі: {_totalEventsLogged}");
         }
     }
 
@@ -137,41 +140,34 @@ namespace FurnitureAnalytics
         {
             // налаштовуємо вивід української мови в консоль без спотворень
             Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.WriteLine("Запуск демонстрації делегатів, лямбда-виразів та подієвої моделі...");
+            Console.WriteLine("Запуск демонстрації подієвої моделі та підсистеми сповіщень...");
             Console.WriteLine();
 
-            // ініціалізуємо головні компоненти системи
+            // ініціалізуємо менеджер замовлень та незалежних підписників
             OrderManager manager = new OrderManager();
-            OrderLogger logger = new OrderLogger();
-            StatisticsTracker stats = new StatisticsTracker();
+            NotificationService notifier = new NotificationService();
+            AuditLogger auditLogger = new AuditLogger();
 
-            // підписуємо компоненти на події менеджера (зниження зв'язаності)
-            logger.Subscribe(manager);
-            stats.Subscribe(manager);
+            // підписуємо сервіси на події менеджера (зниження зв'язаності компонентів)
+            notifier.Register(manager);
+            auditLogger.Register(manager);
 
-            Console.WriteLine("1. Демонстрація генерації подій при створенні сутностей:");
+            Console.WriteLine("1. Сценарій: Створення стандартних замовлень (генеруються події OrderCreated):");
             manager.AddOrder(new Order { Id = 1, ClientName = "Олександр Коваленко", Category = "Кухні", TotalPrice = 45000m, AssemblyHours = 8, IsCompleted = false });
+            Console.WriteLine();
             manager.AddOrder(new Order { Id = 2, ClientName = "Марина Шевченко", Category = "Шафи", TotalPrice = 18000m, AssemblyHours = 4, IsCompleted = false });
 
             Console.WriteLine();
-            Console.WriteLine("2. Демонстрація генерації події при зміні статусу замовлення:");
+            Console.WriteLine("2. Сценарій: Порушення бізнес-правила (генерується подія BusinessRuleViolated):");
+            manager.AddOrder(new Order { Id = 3, ClientName = "Тестовий Клієнт", Category = "Гардеробні", TotalPrice = 0m, AssemblyHours = 2, IsCompleted = false });
+
+            Console.WriteLine();
+            Console.WriteLine("3. Сценарій: Виконання операції монтажу (генерується подія OrderOperationPerformed):");
+            manager.PerformAssembly(1);
+
+            Console.WriteLine();
+            Console.WriteLine("4. Сценарій: Зміна статусу замовлення (генерується подія OrderStatusChanged):");
             manager.CompleteOrder(1);
-
-            Console.WriteLine();
-            Console.WriteLine("3. Демонстрація делегування поведінки через Predicate (фільтрація за ціною понад 30000 грн):");
-            var expensiveOrders = manager.FindOrders(o => o.TotalPrice > 30000m);
-            foreach (var order in expensiveOrders)
-            {
-                Console.WriteLine($"-> Знайдено дорогий проєкт: {order.ClientName} ({order.Category}) на суму {order.TotalPrice} грн");
-            }
-
-            Console.WriteLine();
-            Console.WriteLine("4. Демонстрація делегування поведінки через Action (кастомна обробка та вивід усіх замовлень):");
-            manager.ProcessOrders(o =>
-            {
-                string status = o.IsCompleted ? "Виконано" : "В роботі";
-                Console.WriteLine($"[Обробка Action] Замовлення #{o.Id} | {o.ClientName} | Статус: {status}");
-            });
 
             Console.WriteLine();
             Console.WriteLine("Роботу програми успішно завершено. Натисни будь-яку клавішу...");
