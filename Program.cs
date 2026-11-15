@@ -6,7 +6,7 @@ using System.Collections;
 
 namespace FurnitureAnalytics
 {
-    // структура одного замовлення у нашій предметній області
+    // описуємо сутність замовлення для нашої предметної області меблів
     public class Order
     {
         public int Id { get; set; }
@@ -17,54 +17,41 @@ namespace FurnitureAnalytics
         public bool IsCompleted { get; set; }
     }
 
-    // інтерфейс для контрактів збереження даних (зменшує зв'язаність коду)
-    public interface IOrderRepository
+    // власна колекція (контейнер сутностей), яка реалізує IEnumerable<Order> для підтримки foreach
+    public class FurnitureCollection : IEnumerable<Order>
     {
-        void Add(Order order);
-        IEnumerable<Order> GetAll();
-    }
+        private List<Order> _items = new List<Order>();
 
-    // інтерфейс для контрактів сповіщень клієнтів
-    public interface INotifier
-    {
-        void SendNotification(string clientName, string message);
-    }
-
-    // реалізація сервісу сповіщень у консоль
-    public class ConsoleNotifier : INotifier
-    {
-        public void SendNotification(string clientName, string message)
-        {
-            Console.WriteLine($"[СМС-ПОВІДОМЛЕННЯ для клієнта {clientName}]: {message}");
-        }
-    }
-
-    // власна колекція для зберігання замовлень, яка реалізує IEnumerable<Order> через yield return
-    public class OrderRepository : IOrderRepository, IEnumerable<Order>
-    {
-        private List<Order> _orders = new List<Order>();
-
+        // метод додавання нового елемента до нашого контейнера
         public void Add(Order order)
         {
-            _orders.Add(order);
+            _items.Add(order);
         }
 
-        public IEnumerable<Order> GetAll()
+        // власний метод фільтрації (наприклад, пошук за завершеністю замовлень)
+        public FurnitureCollection GetCompletedOrders()
         {
-            return _orders;
+            var filteredCollection = new FurnitureCollection();
+            foreach (var order in _items)
+            {
+                if (order.IsCompleted)
+                {
+                    filteredCollection.Add(order);
+                }
+            }
+            return filteredCollection;
         }
 
-        // реалізація ітератора за допомогою yield return для перебору через foreach
+        // реалізація ітератора для перебору елементів через foreach
         public IEnumerator<Order> GetEnumerator()
         {
-            foreach (var order in _orders)
+            foreach (var order in _items)
             {
-                // тут можна додати додаткову логіку під час перебору, якщо потрібно
                 yield return order;
             }
         }
 
-        // негенеридкова версія ітератора для сумісності з інтерфейсом IEnumerable
+        // негенеридкова версія ітератора для сумісності з інтерфейсами .NET
         IEnumerator IEnumerable.GetEnumerator()
         {
             return GetEnumerator();
@@ -77,42 +64,47 @@ namespace FurnitureAnalytics
         {
             // налаштовуємо вивід української мови в консоль без спотворень
             Console.OutputEncoding = System.Text.Encoding.UTF8;
-            Console.WriteLine("Запуск демонстрації інтерфейсів та власної ітерації (yield)...");
+            Console.WriteLine("Запуск демонстрації власного контейнера сутностей з підтримкою foreach...");
             Console.WriteLine();
 
-            // створюємо екземпляр нашої власної колекції через інтерфейс (зменшення зв'язаності)
-            IOrderRepository repository = new OrderRepository();
-            INotifier notifier = new ConsoleNotifier();
+            // створюємо екземпляр нашої власної колекції
+            FurnitureCollection repository = new FurnitureCollection();
 
-            // наповнюємо нашу власну колекцію тестовими даними
+            // заповнюємо контейнер тестовими даними
             repository.Add(new Order { Id = 1, ClientName = "Олександр Коваленко", Category = "Кухні", TotalPrice = 45000m, AssemblyHours = 8, IsCompleted = true });
             repository.Add(new Order { Id = 2, ClientName = "Марина Шевченко", Category = "Шафи", TotalPrice = 18000m, AssemblyHours = 4, IsCompleted = true });
             repository.Add(new Order { Id = 3, ClientName = "Ігор Бондаренко", Category = "Офісні меблі", TotalPrice = 25000m, AssemblyHours = 5, IsCompleted = false });
             repository.Add(new Order { Id = 4, ClientName = "Світлана Мельник", Category = "Гардеробні", TotalPrice = 34000m, AssemblyHours = 6, IsCompleted = true });
+            repository.Add(new Order { Id = 5, ClientName = "Катерина Дмитренко", Category = "Шафи", TotalPrice = 15000m, AssemblyHours = 3, IsCompleted = false });
 
-            Console.WriteLine("1. Демонстрація перебору елементів ВЛАСНОЇ колекції через foreach (з використанням yield):");
+            Console.WriteLine("1. Перебір усіх елементів ВЛАСНОЇ колекції через цикл foreach:");
 
-            // перебираємо елементи за допомогою нашого власного ітератора
-            foreach (var order in (OrderRepository)repository)
+            // демонструємо роботу foreach безпосередньо з нашою колекцією
+            foreach (var order in repository)
             {
-                Console.WriteLine($"-> Замовлення #{order.Id} | Клієнт: {order.ClientName} | Категорія: {order.Category} | Сума: {order.TotalPrice} грн");
+                string status = order.IsCompleted ? "Виконано" : "В процесі";
+                Console.WriteLine($"-> Замовлення #{order.Id} | Клієнт: {order.ClientName} | Категорія: {order.Category} | Сума: {order.TotalPrice} грн | Статус: {status}");
             }
 
             Console.WriteLine();
-            Console.WriteLine("2. Демонстрація роботи через інтерфейси (контракти взаємодії):");
+            Console.WriteLine("2. Бізнес-сценарій: використання вбудованої у контейнер фільтрації (тільки виконані замовлення):");
 
-            // використовуємо залежність через інтерфейс сповіщень для виконаних замовлень
-            foreach (var order in repository.GetAll())
+            // отримуємо відфільтровану власну підколлекцію
+            FurnitureCollection completedOrders = repository.GetCompletedOrders();
+
+            decimal totalSum = 0;
+            foreach (var order in completedOrders)
             {
-                if (order.IsCompleted)
-                {
-                    notifier.SendNotification(order.ClientName, "Ваші меблі успішно змонтовано. Дякуємо за замовлення!");
-                }
+                totalSum += order.TotalPrice;
+                Console.WriteLine($"-> Виконаний проєкт: {order.ClientName} ({order.Category}) на суму {order.TotalPrice} грн");
             }
+
+            Console.WriteLine();
+            Console.WriteLine($"Загальна сума успішно виконаних замовлень у контейнері: {totalSum} грн");
 
             Console.WriteLine();
             Console.WriteLine("Роботу програми успішно завершено. Натисни будь-яку клавішу...");
             Console.ReadKey();
         }
     }
-}   
+}
